@@ -52,7 +52,6 @@ export class GoodsService {
 
   async updateGoods(): Promise<void> {
     this.logger.log('Начинаем обновление товаров...');
-
     const batchSize = 200;
     let offset = 0;
 
@@ -119,7 +118,7 @@ export class GoodsService {
             this.logger.warn(
               `Товар увеличился на складе: ${existing.name} (ID: ${existing.productId}) с ${existing.countSource} → ${countSource}`,
             );
-            await this.telegramService.sendMessage(
+            await this.telegramService.sendMessageToAll(
               `📦 Товар увеличился на складе: ${existing.name}\nСтарое количество: ${existing.countSource} ед.\nНовое количество: ${countSource} ед.`,
             );
           }
