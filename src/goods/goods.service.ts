@@ -31,12 +31,25 @@ export class GoodsService {
   }
 
   async fetchDeliveryGoods(
+    city: 'Astana' | 'Almaty',
     sourceIds: number[],
     recipientIds: number[],
   ): Promise<DeliveryGoodsResponse> {
     try {
+      let sourceId;
+
+      switch (city) {
+        case 'Astana':
+          sourceId = 715;
+          break;
+        case 'Almaty':
+          sourceId = 139;
+          break;
+        default:
+          sourceId = 139;
+      }
       const body = [
-        [715, sourceIds],
+        [sourceId, sourceIds],
         [254, recipientIds],
       ];
       const response = await axios.post<DeliveryGoodsResponse>(
@@ -78,28 +91,54 @@ export class GoodsService {
         continue;
       }
 
-      const delivery = await this.fetchDeliveryGoods(sourceIds, recipientIds);
-      const sourceMap = new Map<number, number>();
-      const recipientMap = new Map<number, number>();
+      const deliveryAlmaty = await this.fetchDeliveryGoods(
+        'Almaty',
+        sourceIds,
+        recipientIds,
+      );
+      const deliveryAstana = await this.fetchDeliveryGoods(
+        'Astana',
+        sourceIds,
+        recipientIds,
+      );
+      const sourceMapAlmaty = new Map<number, number>();
+      const recipientMapAlmaty = new Map<number, number>();
+      const sourceMapAstana = new Map<number, number>();
+      const recipientMapAstana = new Map<number, number>();
 
-      const sourceArray: number[] = delivery[0] ?? [];
-      const recipientArray: number[] = delivery[1] ?? [];
+      const sourceArrayAlmaty: number[] = deliveryAlmaty[0] ?? [];
+      const recipientArrayAlmaty: number[] = deliveryAlmaty[1] ?? [];
+
+      const sourceArrayAstana: number[] = deliveryAstana[0] ?? [];
+      const recipientArrayAstana: number[] = deliveryAstana[1] ?? [];
 
       sourceIds.forEach((id, idx) => {
-        const count: number = sourceArray[idx] ?? 0;
-        sourceMap.set(id, count);
+        const count: number = sourceArrayAlmaty[idx] ?? 0;
+        sourceMapAlmaty.set(id, count);
       });
 
       recipientIds.forEach((id, idx) => {
-        const count: number = recipientArray[idx] ?? 0;
-        recipientMap.set(id, count);
+        const count: number = recipientArrayAlmaty[idx] ?? 0;
+        recipientMapAlmaty.set(id, count);
+      });
+
+      sourceIds.forEach((id, idx) => {
+        const count: number = sourceArrayAstana[idx] ?? 0;
+        sourceMapAstana.set(id, count);
+      });
+
+      recipientIds.forEach((id, idx) => {
+        const count: number = recipientArrayAstana[idx] ?? 0;
+        recipientMapAstana.set(id, count);
       });
 
       for (const item of shopGoods) {
         if (!item) continue;
 
-        const countSource = sourceMap.get(item.id) ?? 0;
-        const countRecipient = recipientMap.get(item.id) ?? 0;
+        const countSourceAlmaty = sourceMapAlmaty.get(item.id) ?? 0;
+        const countRecipientAlmaty = recipientMapAlmaty.get(item.id) ?? 0;
+        const countSourceAstana = sourceMapAstana.get(item.id) ?? 0;
+        const countRecipientAstana = recipientMapAstana.get(item.id) ?? 0;
 
         const existing = await this.goodsRepo.findOneBy({ productId: item.id });
 
@@ -108,23 +147,50 @@ export class GoodsService {
             productId: item.id,
             name: item.title.ru,
             price: item.price.store.kzt,
-            countSource,
-            countRecipient,
+            countSourceAlmaty: countSourceAlmaty,
+            countSourceAstana: countSourceAstana,
+            countRecipientAlmaty: countRecipientAlmaty,
+            countRecipientAstana: countRecipientAstana,
             link: `${item.path}/${item.name}`,
           });
           await this.goodsRepo.save(newGood);
         } else {
-          if (countSource > existing.countSource) {
+          if (countSourceAlmaty > existing.countSourceAlmaty) {
+            const productIdStr = `0000${existing.productId}`;
+
             this.logger.warn(
-              `Товар увеличился на складе: ${existing.name} (ID: ${existing.productId}) с ${existing.countSource} → ${countSource}`,
+              `Товар увеличился на складе Алматы: ${existing.name} (ID: ${productIdStr}) с ${existing.countSourceAlmaty} → ${countSourceAlmaty}`,
             );
+
             await this.telegramService.sendMessageToAll(
-              `📦 Товар увеличился на складе: ${existing.name}\nСтарое количество: ${existing.countSource} ед.\nНовое количество: ${countSource} ед.`,
+              `📦 Товар увеличился на складе *Алматы*:\n` +
+                `ID: \`${productIdStr}\`\n` +
+                `Название: ${existing.name}\n` +
+                `Старое количество: ${existing.countSourceAlmaty}\n` +
+                `Новое количество: ${countSourceAlmaty}`,
             );
           }
 
-          existing.countSource = countSource;
-          existing.countRecipient = countRecipient;
+          if (countSourceAstana > existing.countSourceAstana) {
+            const productIdStr = `0000${existing.productId}`;
+
+            this.logger.warn(
+              `Товар увеличился на складе Астана: ${existing.name} (ID: ${productIdStr}) с ${existing.countRecipientAstana} → ${countSourceAstana}`,
+            );
+
+            await this.telegramService.sendMessageToAll(
+              `📦 Товар увеличился на складе *Астана*:\n` +
+                `ID: \`${productIdStr}\`\n` +
+                `Название: ${existing.name}\n` +
+                `Старое количество: ${existing.countRecipientAstana}\n` +
+                `Новое количество: ${countSourceAstana}`,
+            );
+          }
+
+          existing.countSourceAlmaty = countSourceAlmaty;
+          existing.countSourceAstana = countSourceAstana;
+          existing.countRecipientAlmaty = countRecipientAlmaty;
+          existing.countRecipientAstana = countRecipientAstana;
           existing.price = item.price.store.kzt;
           await this.goodsRepo.save(existing);
         }

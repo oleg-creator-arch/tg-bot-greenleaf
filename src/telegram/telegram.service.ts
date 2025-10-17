@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectBot } from 'nestjs-telegraf';
-import { Telegraf } from 'telegraf';
+import { Telegraf, Context } from 'telegraf';
 import { Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { UsersEntity } from 'src/users/entity/users.entity';
@@ -17,15 +17,33 @@ interface TelegramErrorResponse {
 @Injectable()
 export class TelegramService {
   private readonly logger = new Logger(TelegramService.name);
-
   private lastSentTime = 0;
   private readonly delayMs = 1000;
 
   constructor(
-    @InjectBot() private readonly bot: Telegraf,
+    @InjectBot() private readonly bot: Telegraf<Context>,
     @InjectRepository(UsersEntity)
     private readonly usersRepo: Repository<UsersEntity>,
-  ) {}
+  ) {
+    this.bot.start(async (ctx) => {
+      const chatId = ctx.chat?.id;
+      if (!chatId) return;
+
+      await this.subscribe(chatId);
+      await this.reply(
+        ctx,
+        '👋 Привет! Теперь вы будете получать уведомления.',
+      );
+    });
+
+    this.bot.command('stop', async (ctx) => {
+      const chatId = ctx.chat?.id;
+      if (!chatId) return;
+
+      await this.unsubscribe(chatId);
+      await this.reply(ctx, '❌ Вы больше не будете получать уведомления.');
+    });
+  }
 
   async subscribe(chatId: number) {
     const existing = await this.usersRepo.findOneBy({ chatId });
@@ -33,6 +51,8 @@ export class TelegramService {
       const user = this.usersRepo.create({ chatId });
       await this.usersRepo.save(user);
       this.logger.log(`Добавлен новый пользователь ${chatId}`);
+    } else {
+      this.logger.log(`Пользователь ${chatId} уже подписан`);
     }
   }
 
@@ -83,12 +103,14 @@ export class TelegramService {
     }
   }
 
-  async reply(ctx: { reply: (text: string) => Promise<any> }, text: string) {
+  async reply(ctx: Context, text: string) {
     try {
       await ctx.reply(text);
     } catch (err) {
       this.logger.error(
-        `Ошибка при отправке ответа в чате: ${err instanceof Error ? err.message : String(err)}`,
+        `Ошибка при ответе в чате: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
       );
     }
   }

@@ -20,10 +20,16 @@ export class GoodEntity {
   price: number;
 
   @Column({ type: 'int', default: 0 })
-  countSource: number;
+  countSourceAstana: number;
 
   @Column({ type: 'int', default: 0 })
-  countRecipient: number;
+  countSourceAlmaty: number;
+
+  @Column({ type: 'int', default: 0 })
+  countRecipientAstana: number;
+
+  @Column({ type: 'int', default: 0 })
+  countRecipientAlmaty: number;
 
   @Column()
   link: string;
