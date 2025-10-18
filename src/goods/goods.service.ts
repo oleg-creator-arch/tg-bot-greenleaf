@@ -40,10 +40,10 @@ export class GoodsService {
 
       switch (city) {
         case 'Astana':
-          sourceId = 715;
+          sourceId = 139;
           break;
         case 'Almaty':
-          sourceId = 139;
+          sourceId = 715;
           break;
         default:
           sourceId = 139;
@@ -163,11 +163,12 @@ export class GoodsService {
             );
 
             await this.telegramService.sendMessageToAll(
-              `📦 Товар увеличился на складе *Алматы*:\n` +
-                `ID: \`${productIdStr}\`\n` +
-                `Название: ${existing.name}\n` +
-                `Старое количество: ${existing.countSourceAlmaty}\n` +
-                `Новое количество: ${countSourceAlmaty}`,
+              `📦 *Товар увеличился на складе Алматы:*\n` +
+                `🆔 ID: \`${productIdStr}\`\n` +
+                `📦 Название: *${existing.name}*\n` +
+                `📉 Было: ${existing.countSourceAlmaty}\n` +
+                `📈 Стало: ${countSourceAlmaty}`,
+              { parse_mode: 'Markdown' },
             );
           }
 
@@ -175,15 +176,16 @@ export class GoodsService {
             const productIdStr = `0000${existing.productId}`;
 
             this.logger.warn(
-              `Товар увеличился на складе Астана: ${existing.name} (ID: ${productIdStr}) с ${existing.countRecipientAstana} → ${countSourceAstana}`,
+              `Товар увеличился на складе Астана: ${existing.name} (ID: ${productIdStr}) с ${existing.countSourceAstana} → ${countSourceAstana}`,
             );
 
             await this.telegramService.sendMessageToAll(
-              `📦 Товар увеличился на складе *Астана*:\n` +
-                `ID: \`${productIdStr}\`\n` +
-                `Название: ${existing.name}\n` +
-                `Старое количество: ${existing.countRecipientAstana}\n` +
-                `Новое количество: ${countSourceAstana}`,
+              `📦 *Товар увеличился на складе Астана:*\n` +
+                `🆔 ID: \`${productIdStr}\`\n` +
+                `📦 Название: *${existing.name}*\n` +
+                `📉 Было: ${existing.countSourceAstana}\n` +
+                `📈 Стало: ${countSourceAstana}`,
+              { parse_mode: 'Markdown' },
             );
           }
 

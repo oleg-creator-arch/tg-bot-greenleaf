@@ -61,20 +61,24 @@ export class TelegramService {
     this.logger.log(`Пользователь ${chatId} удалён из базы`);
   }
 
-  async sendMessageToAll(message: string) {
+  async sendMessageToAll(message: string, options?: Record<string, unknown>) {
     const users = await this.usersRepo.find();
     for (const user of users) {
-      await this.sendMessage(user.chatId, message);
+      await this.sendMessage(user.chatId, message, options);
     }
   }
 
-  private async sendMessage(chatId: number, message: string) {
+  private async sendMessage(
+    chatId: number,
+    message: string,
+    options?: Record<string, unknown>,
+  ) {
     try {
       const now = Date.now();
       const diff = now - this.lastSentTime;
       if (diff < this.delayMs) await sleep(this.delayMs - diff);
 
-      await this.bot.telegram.sendMessage(chatId, message);
+      await this.bot.telegram.sendMessage(chatId, message, options);
       this.lastSentTime = Date.now();
       this.logger.log(`Сообщение отправлено пользователю ${chatId}`);
     } catch (err: unknown) {
