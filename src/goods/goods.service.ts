@@ -20,10 +20,10 @@ export class GoodsService {
     'https://greenleaf-global.com/api/v1/delivery/goods/rest';
 
   private readonly warehouses: WarehouseConfig[] = [
-    { name: 'АлматыСтарый', sourceId: 715 },
-    { name: 'АлматыНовый', sourceId: 1422 },
-    { name: 'АстанаСтарый', sourceId: 139 },
-    { name: 'АстанаНовый', sourceId: 1388 },
+    { name: 'Алматы Старый', sourceId: 715 },
+    { name: 'Алматы Новый', sourceId: 1422 },
+    { name: 'Астана Старый', sourceId: 139 },
+    { name: 'Астана Новый', sourceId: 1388 },
   ];
 
   constructor(
