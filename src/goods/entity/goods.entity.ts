@@ -2,8 +2,10 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  OneToMany,
   PrimaryGeneratedColumn,
 } from 'typeorm';
+import { GoodStock } from './good-stock.entity';
 
 @Entity('goods')
 export class GoodEntity {
@@ -19,21 +21,12 @@ export class GoodEntity {
   @Column({ type: 'int', default: 0 })
   price: number;
 
-  @Column({ type: 'int', default: 0 })
-  countSourceAstana: number;
-
-  @Column({ type: 'int', default: 0 })
-  countSourceAlmaty: number;
-
-  @Column({ type: 'int', default: 0 })
-  countRecipientAstana: number;
-
-  @Column({ type: 'int', default: 0 })
-  countRecipientAlmaty: number;
-
   @Column()
   link: string;
 
   @CreateDateColumn()
   createdAt: Date;
+
+  @OneToMany(() => GoodStock, (stock) => stock.good)
+  stocks: GoodStock[];
 }

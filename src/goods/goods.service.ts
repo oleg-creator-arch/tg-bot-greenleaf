@@ -5,9 +5,11 @@ import { Repository } from 'typeorm';
 import { TelegramService } from '../telegram/telegram.service';
 import { GoodEntity } from './entity/goods.entity';
 import { DeliveryGoodsResponse, ShopGoodsItem } from './dto/goods-response.dto';
+import { GoodStock } from './entity/good-stock.entity';
 
 interface WarehouseConfig {
   name: string;
+  displayName: string;
   sourceId: number;
 }
 
@@ -20,15 +22,29 @@ export class GoodsService {
     'https://greenleaf-global.com/api/v1/delivery/goods/rest';
 
   private readonly warehouses: WarehouseConfig[] = [
-    { name: 'Алматы Старый', sourceId: 715 },
-    { name: 'Алматы Новый', sourceId: 1422 },
-    { name: 'Астана Старый', sourceId: 139 },
-    { name: 'Астана Новый', sourceId: 1388 },
+    {
+      name: 'almatyOld',
+      displayName: 'Алматы Старый',
+      sourceId: 715,
+    },
+    { name: 'almatyNew', displayName: 'Алматы Новый', sourceId: 1422 },
+    {
+      name: 'astanaOld',
+      displayName: 'Астана Старый',
+      sourceId: 139,
+    },
+    {
+      name: 'astanaNew',
+      displayName: 'Астана Новый',
+      sourceId: 1388,
+    },
   ];
 
   constructor(
     @InjectRepository(GoodEntity)
     private readonly goodsRepo: Repository<GoodEntity>,
+    @InjectRepository(GoodStock)
+    private readonly stockRepo: Repository<GoodStock>,
     private readonly telegramService: TelegramService,
   ) {}
 
@@ -95,15 +111,38 @@ export class GoodsService {
       const warehouseMaps = deliveries.reduce(
         (acc, wh) => {
           const [src, rec] = wh.data;
+
+          const sourceMap = new Map<number, number>();
+          const recipientMap = new Map<number, number>();
+
+          if (
+            src.length !== validIds.length ||
+            rec.length !== validIds.length
+          ) {
+            this.logger.warn(
+              `Длина src/rec не совпадает с validIds для склада ${wh.displayName}`,
+            );
+          }
+
+          validIds.forEach((id, idx) => {
+            sourceMap.set(id, src[idx] ?? 0);
+            recipientMap.set(id, rec[idx] ?? 0);
+          });
+
           acc[wh.name] = {
-            source: new Map(validIds.map((id, idx) => [id, src[idx] ?? 0])),
-            recipient: new Map(validIds.map((id, idx) => [id, rec[idx] ?? 0])),
+            source: sourceMap,
+            recipient: recipientMap,
+            displayName: wh.displayName,
           };
           return acc;
         },
         {} as Record<
           string,
-          { source: Map<number, number>; recipient: Map<number, number> }
+          {
+            source: Map<number, number>;
+            recipient: Map<number, number>;
+            displayName: string;
+          }
         >,
       );
 
@@ -111,43 +150,50 @@ export class GoodsService {
         if (!item) continue;
 
         const boxCount = this.extractCountInBox(item.title.ru) ?? Infinity;
-        const existing = await this.goodsRepo.findOneBy({ productId: item.id });
+        let good = await this.goodsRepo.findOne({
+          where: { productId: item.id },
+          relations: ['stocks'],
+        });
 
-        if (!existing) {
-          const newGood = this.goodsRepo.create({
+        if (!good) {
+          good = this.goodsRepo.create({
             productId: item.id,
             name: item.title.ru,
             price: item.price.store.kzt,
             link: `${item.path}/${item.name}`,
-            ...Object.fromEntries(
-              this.warehouses.flatMap((wh) => [
-                [
-                  `countSource${wh.name}`,
-                  warehouseMaps[wh.name].source.get(item.id) ?? 0,
-                ],
-                [
-                  `countRecipient${wh.name}`,
-                  warehouseMaps[wh.name].recipient.get(item.id) ?? 0,
-                ],
-              ]),
-            ),
+            stocks: [],
           });
-          await this.goodsRepo.save(newGood);
+          good = await this.goodsRepo.save(good);
         } else {
-          for (const wh of this.warehouses) {
-            const newCount = warehouseMaps[wh.name].source.get(item.id) ?? 0;
-            const fieldName = `countSource${wh.name}` as keyof GoodEntity;
-            const oldCount = (existing[fieldName] as number) ?? 0;
+          good.price = item.price.store.kzt;
+        }
 
-            if (newCount <= oldCount || newCount < 0) continue;
+        for (const wh of this.warehouses) {
+          const sourceCount = warehouseMaps[wh.name].source.get(item.id) ?? 0;
+          const recipientCount =
+            warehouseMaps[wh.name].recipient.get(item.id) ?? 0;
+          const displayName = warehouseMaps[wh.name].displayName;
 
+          let stock = good.stocks.find((s) => s.warehouse === wh.name);
+
+          if (!stock) {
+            stock = new GoodStock();
+            stock.warehouse = wh.name;
+            stock.displayName = displayName;
+            stock.sourceCount = sourceCount;
+            stock.recipientCount = recipientCount;
+            stock.good = good;
+            good.stocks.push(stock);
+            this.logger.log(`goodpush`);
+            await this.stockRepo.save(stock);
+          } else {
             if (
-              newCount > oldCount &&
-              newCount > boxCount &&
-              boxCount !== Infinity
+              sourceCount > stock.sourceCount &&
+              sourceCount > boxCount &&
+              sourceCount > 0
             ) {
-              const productIdStr = `0000${existing.productId}`;
-              const message = `📦 *Товар увеличился на складе ${wh.name}:*\n🆔 ID: \`${productIdStr}\`\n📦 Название: *${existing.name}*\n📉 Было: ${oldCount}\n📈 Стало: ${newCount}`;
+              const productIdStr = `0000${good.productId}`;
+              const message = `📦 *Товар увеличился на складе ${stock.displayName}:*\n🆔 ID: \`${productIdStr}\`\n📦 Название: *${good.name}*\n📉 Было: ${stock.sourceCount}\n📈 Стало: ${sourceCount}`;
 
               this.logger.warn(message.replace(/\*/g, ''));
               await this.telegramService.sendMessageToAll(message, {
@@ -155,14 +201,13 @@ export class GoodsService {
               });
             }
 
-            existing[`countSource${wh.name}`] = newCount;
-            existing[`countRecipient${wh.name}`] =
-              warehouseMaps[wh.name].recipient.get(item.id) ?? 0;
+            stock.sourceCount = sourceCount;
+            stock.recipientCount = recipientCount;
+            await this.stockRepo.save(stock);
           }
-
-          existing.price = item.price.store.kzt;
-          await this.goodsRepo.save(existing);
         }
+
+        await this.goodsRepo.save(good);
       }
 
       offset += batchSize;
