@@ -6,6 +6,11 @@ import { TelegramService } from '../telegram/telegram.service';
 import { GoodEntity } from './entity/goods.entity';
 import { DeliveryGoodsResponse, ShopGoodsItem } from './dto/goods-response.dto';
 
+interface WarehouseConfig {
+  name: string;
+  sourceId: number;
+}
+
 @Injectable()
 export class GoodsService {
   private readonly logger = new Logger(GoodsService.name);
@@ -14,11 +19,24 @@ export class GoodsService {
   private readonly DELIVERY_API =
     'https://greenleaf-global.com/api/v1/delivery/goods/rest';
 
+  private readonly warehouses: WarehouseConfig[] = [
+    { name: 'АлматыСтарый', sourceId: 715 },
+    { name: 'АлматыНовый', sourceId: 1422 },
+    { name: 'АстанаСтарый', sourceId: 139 },
+    { name: 'АстанаНовый', sourceId: 1388 },
+  ];
+
   constructor(
     @InjectRepository(GoodEntity)
     private readonly goodsRepo: Repository<GoodEntity>,
     private readonly telegramService: TelegramService,
   ) {}
+
+  /** Извлекает "в коробке N шт" из названия товара */
+  private extractCountInBox(name: string): number | null {
+    const match = name.match(/\((?:Кол-во\s+)?в\s*коробке\s*(\d+)\s*шт\)/i);
+    return match ? parseInt(match[1], 10) : null;
+  }
 
   async fetchShopGoods(ids: number[]): Promise<ShopGoodsItem[]> {
     try {
@@ -31,23 +49,11 @@ export class GoodsService {
   }
 
   async fetchDeliveryGoods(
-    city: 'Astana' | 'Almaty',
+    sourceId: number,
     sourceIds: number[],
     recipientIds: number[],
   ): Promise<DeliveryGoodsResponse> {
     try {
-      let sourceId;
-
-      switch (city) {
-        case 'Astana':
-          sourceId = 139;
-          break;
-        case 'Almaty':
-          sourceId = 715;
-          break;
-        default:
-          sourceId = 139;
-      }
       const body = [
         [sourceId, sourceIds],
         [254, recipientIds],
@@ -70,76 +76,41 @@ export class GoodsService {
 
     while (true) {
       const batchIds = Array.from({ length: batchSize }, (_, i) => i + offset);
-
       const shopGoods = await this.fetchShopGoods(batchIds);
 
-      if (!shopGoods || shopGoods.length === 0) {
-        this.logger.log(`Достигнут конец списка товаров на offset=${offset}`);
+      if (!shopGoods.length) {
+        this.logger.log(`Достигнут конец списка товаров (offset=${offset})`);
         break;
       }
 
-      const sourceIds = shopGoods.map((g) => g.id).filter((id) => id != null);
-      const recipientIds = shopGoods
-        .map((g) => g.id)
-        .filter((id) => id != null);
+      const validIds = shopGoods.map((g) => g.id).filter(Boolean);
 
-      if (sourceIds.length === 0 && recipientIds.length === 0) {
-        this.logger.warn(
-          `Нет доступных ID для доставки на offset=${offset}, пропускаем батч`,
-        );
-        offset += batchSize;
-        continue;
-      }
-
-      const deliveryAlmaty = await this.fetchDeliveryGoods(
-        'Almaty',
-        sourceIds,
-        recipientIds,
+      const deliveries = await Promise.all(
+        this.warehouses.map(async (wh) => ({
+          ...wh,
+          data: await this.fetchDeliveryGoods(wh.sourceId, validIds, validIds),
+        })),
       );
-      const deliveryAstana = await this.fetchDeliveryGoods(
-        'Astana',
-        sourceIds,
-        recipientIds,
+
+      const warehouseMaps = deliveries.reduce(
+        (acc, wh) => {
+          const [src, rec] = wh.data;
+          acc[wh.name] = {
+            source: new Map(validIds.map((id, idx) => [id, src[idx] ?? 0])),
+            recipient: new Map(validIds.map((id, idx) => [id, rec[idx] ?? 0])),
+          };
+          return acc;
+        },
+        {} as Record<
+          string,
+          { source: Map<number, number>; recipient: Map<number, number> }
+        >,
       );
-      const sourceMapAlmaty = new Map<number, number>();
-      const recipientMapAlmaty = new Map<number, number>();
-      const sourceMapAstana = new Map<number, number>();
-      const recipientMapAstana = new Map<number, number>();
-
-      const sourceArrayAlmaty: number[] = deliveryAlmaty[0] ?? [];
-      const recipientArrayAlmaty: number[] = deliveryAlmaty[1] ?? [];
-
-      const sourceArrayAstana: number[] = deliveryAstana[0] ?? [];
-      const recipientArrayAstana: number[] = deliveryAstana[1] ?? [];
-
-      sourceIds.forEach((id, idx) => {
-        const count: number = sourceArrayAlmaty[idx] ?? 0;
-        sourceMapAlmaty.set(id, count);
-      });
-
-      recipientIds.forEach((id, idx) => {
-        const count: number = recipientArrayAlmaty[idx] ?? 0;
-        recipientMapAlmaty.set(id, count);
-      });
-
-      sourceIds.forEach((id, idx) => {
-        const count: number = sourceArrayAstana[idx] ?? 0;
-        sourceMapAstana.set(id, count);
-      });
-
-      recipientIds.forEach((id, idx) => {
-        const count: number = recipientArrayAstana[idx] ?? 0;
-        recipientMapAstana.set(id, count);
-      });
 
       for (const item of shopGoods) {
         if (!item) continue;
 
-        const countSourceAlmaty = sourceMapAlmaty.get(item.id) ?? 0;
-        const countRecipientAlmaty = recipientMapAlmaty.get(item.id) ?? 0;
-        const countSourceAstana = sourceMapAstana.get(item.id) ?? 0;
-        const countRecipientAstana = recipientMapAstana.get(item.id) ?? 0;
-
+        const boxCount = this.extractCountInBox(item.title.ru) ?? Infinity;
         const existing = await this.goodsRepo.findOneBy({ productId: item.id });
 
         if (!existing) {
@@ -147,52 +118,48 @@ export class GoodsService {
             productId: item.id,
             name: item.title.ru,
             price: item.price.store.kzt,
-            countSourceAlmaty: countSourceAlmaty,
-            countSourceAstana: countSourceAstana,
-            countRecipientAlmaty: countRecipientAlmaty,
-            countRecipientAstana: countRecipientAstana,
             link: `${item.path}/${item.name}`,
+            ...Object.fromEntries(
+              this.warehouses.flatMap((wh) => [
+                [
+                  `countSource${wh.name}`,
+                  warehouseMaps[wh.name].source.get(item.id) ?? 0,
+                ],
+                [
+                  `countRecipient${wh.name}`,
+                  warehouseMaps[wh.name].recipient.get(item.id) ?? 0,
+                ],
+              ]),
+            ),
           });
           await this.goodsRepo.save(newGood);
         } else {
-          if (countSourceAlmaty > existing.countSourceAlmaty) {
-            const productIdStr = `0000${existing.productId}`;
+          for (const wh of this.warehouses) {
+            const newCount = warehouseMaps[wh.name].source.get(item.id) ?? 0;
+            const fieldName = `countSource${wh.name}` as keyof GoodEntity;
+            const oldCount = (existing[fieldName] as number) ?? 0;
 
-            this.logger.warn(
-              `Товар увеличился на складе Алматы: ${existing.name} (ID: ${productIdStr}) с ${existing.countSourceAlmaty} → ${countSourceAlmaty}`,
-            );
+            if (newCount <= oldCount || newCount < 0) continue;
 
-            await this.telegramService.sendMessageToAll(
-              `📦 *Товар увеличился на складе Алматы:*\n` +
-                `🆔 ID: \`${productIdStr}\`\n` +
-                `📦 Название: *${existing.name}*\n` +
-                `📉 Было: ${existing.countSourceAlmaty}\n` +
-                `📈 Стало: ${countSourceAlmaty}`,
-              { parse_mode: 'Markdown' },
-            );
+            if (
+              newCount > oldCount &&
+              newCount > boxCount &&
+              boxCount !== Infinity
+            ) {
+              const productIdStr = `0000${existing.productId}`;
+              const message = `📦 *Товар увеличился на складе ${wh.name}:*\n🆔 ID: \`${productIdStr}\`\n📦 Название: *${existing.name}*\n📉 Было: ${oldCount}\n📈 Стало: ${newCount}\n📦 В коробке: ${boxCount} шт`;
+
+              this.logger.warn(message.replace(/\*/g, ''));
+              await this.telegramService.sendMessageToAll(message, {
+                parse_mode: 'Markdown',
+              });
+            }
+
+            existing[`countSource${wh.name}`] = newCount;
+            existing[`countRecipient${wh.name}`] =
+              warehouseMaps[wh.name].recipient.get(item.id) ?? 0;
           }
 
-          if (countSourceAstana > existing.countSourceAstana) {
-            const productIdStr = `0000${existing.productId}`;
-
-            this.logger.warn(
-              `Товар увеличился на складе Астана: ${existing.name} (ID: ${productIdStr}) с ${existing.countSourceAstana} → ${countSourceAstana}`,
-            );
-
-            await this.telegramService.sendMessageToAll(
-              `📦 *Товар увеличился на складе Астана:*\n` +
-                `🆔 ID: \`${productIdStr}\`\n` +
-                `📦 Название: *${existing.name}*\n` +
-                `📉 Было: ${existing.countSourceAstana}\n` +
-                `📈 Стало: ${countSourceAstana}`,
-              { parse_mode: 'Markdown' },
-            );
-          }
-
-          existing.countSourceAlmaty = countSourceAlmaty;
-          existing.countSourceAstana = countSourceAstana;
-          existing.countRecipientAlmaty = countRecipientAlmaty;
-          existing.countRecipientAstana = countRecipientAstana;
           existing.price = item.price.store.kzt;
           await this.goodsRepo.save(existing);
         }
