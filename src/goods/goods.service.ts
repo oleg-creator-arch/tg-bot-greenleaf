@@ -184,7 +184,6 @@ export class GoodsService {
             stock.recipientCount = recipientCount;
             stock.good = good;
             good.stocks.push(stock);
-            this.logger.log(`goodpush`);
             await this.stockRepo.save(stock);
           } else {
             if (
