@@ -147,7 +147,7 @@ export class GoodsService {
               boxCount !== Infinity
             ) {
               const productIdStr = `0000${existing.productId}`;
-              const message = `📦 *Товар увеличился на складе ${wh.name}:*\n🆔 ID: \`${productIdStr}\`\n📦 Название: *${existing.name}*\n📉 Было: ${oldCount}\n📈 Стало: ${newCount}\n📦 В коробке: ${boxCount} шт`;
+              const message = `📦 *Товар увеличился на складе ${wh.name}:*\n🆔 ID: \`${productIdStr}\`\n📦 Название: *${existing.name}*\n📉 Было: ${oldCount}\n📈 Стало: ${newCount}`;
 
               this.logger.warn(message.replace(/\*/g, ''));
               await this.telegramService.sendMessageToAll(message, {
