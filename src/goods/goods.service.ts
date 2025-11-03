@@ -186,10 +186,13 @@ export class GoodsService {
             good.stocks.push(stock);
             await this.stockRepo.save(stock);
           } else {
+            const diff = sourceCount - stock.sourceCount;
+
             if (
               sourceCount > stock.sourceCount &&
-              sourceCount > boxCount &&
-              sourceCount > 0
+              sourceCount > 0 &&
+              ((boxCount === Infinity && diff > 0) ||
+                (boxCount !== Infinity && diff > boxCount))
             ) {
               const productIdStr = `0000${good.productId}`;
               const message = `📦 *Товар увеличился на складе ${stock.displayName}:*\n🆔 ID: \`${productIdStr}\`\n📦 Название: *${good.name}*\n📉 Было: ${stock.sourceCount}\n📈 Стало: ${sourceCount}`;
